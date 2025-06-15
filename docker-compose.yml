@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: go-users
+    restart: always
+    depends_on:
+      - postgres
+    ports:
+      - "8080:8080"
+      - "50051:50051"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=users
+      - DB_SSL_MODE=disable
+      - JWT_SECRET_KEY=your-secret-key
+      - JWT_EXPIRATION_HOURS=24
+      - LOG_LEVEL=info
+      - ENVIRONMENT=development
+    command: ["/app/go-users", "migrate", "&&", "/app/go-users", "http-server"]
+
+  postgres:
+    image: postgres:14-alpine
+    container_name: go-users-postgres
+    restart: always
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=users
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data: 
