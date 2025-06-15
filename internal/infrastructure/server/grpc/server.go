@@ -3,12 +3,13 @@ package grpc
 import (
 	"context"
 	"fmt"
-	"log"
 	"net"
 
 	"github.com/anatoly_dev/go-users/internal/app"
 	"github.com/anatoly_dev/go-users/internal/config"
 	"github.com/anatoly_dev/go-users/internal/domain/user"
+	"github.com/anatoly_dev/go-users/pkg/logger"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -42,14 +43,14 @@ func (s *Server) Start() error {
 
 	reflection.Register(s.server)
 
-	log.Printf("Starting gRPC server on port %s", s.config.Server.GRPCPort)
+	logger.Info("Starting gRPC server", zap.String("port", s.config.Server.GRPCPort))
 	return s.server.Serve(listener)
 }
 
 func (s *Server) Stop() {
 	if s.server != nil {
 		s.server.GracefulStop()
-		log.Printf("Stopped gRPC server")
+		logger.Info("Stopped gRPC server")
 	}
 }
 

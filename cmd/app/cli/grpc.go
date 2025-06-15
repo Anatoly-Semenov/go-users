@@ -9,51 +9,105 @@ import (
 	authimpl "github.com/anatoly_dev/go-users/internal/infrastructure/auth"
 	"github.com/anatoly_dev/go-users/internal/infrastructure/repository"
 	grpcserver "github.com/anatoly_dev/go-users/internal/infrastructure/server/grpc"
+	"github.com/anatoly_dev/go-users/pkg/logger"
 	_ "github.com/lib/pq"
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 )
 
-var grpcServerCmd = &cobra.Command{
-	Use:   "grpc-server",
-	Short: "Start gRPC server",
-	Long:  `Start the gRPC server for the user management service`,
-	Run: func(cmd *cobra.Command, args []string) {
+type GRPCServerCommand struct {
+	cmd *cobra.Command
+}
 
-		cfg, err := config.NewConfig(cmd)
-		if err != nil {
-			log.Fatalf("Failed to load config: %v", err)
-		}
+func newGRPCServerCommand() *cobra.Command {
+	grpcCmd := &GRPCServerCommand{}
+	grpcCmd.cmd = &cobra.Command{
+		Use:   "grpc-server",
+		Short: "Start gRPC server",
+		Long:  `Start the gRPC server for the user management service`,
+		RunE:  grpcCmd.run,
+	}
 
-		db, err := sql.Open("postgres", cfg.GetDSN())
-		if err != nil {
-			log.Fatalf("Failed to connect to database: %v", err)
-		}
-		defer db.Close()
+	grpcCmd.setupFlags()
 
-		if err := db.Ping(); err != nil {
-			log.Fatalf("Failed to ping database: %v", err)
-		}
+	return grpcCmd.cmd
+}
 
-		if err := repository.MigrateDB(db, "migrations"); err != nil {
-			log.Fatalf("Failed to apply migrations: %v", err)
-		}
+func (g *GRPCServerCommand) setupFlags() {
+	g.cmd.Flags().StringP("port", "p", "50051", "Port to run the gRPC server on")
+	g.cmd.Flags().StringP("config", "c", "", "Path to config file")
+}
 
-		userRepo := repository.NewPostgresUserRepository(db)
+func (g *GRPCServerCommand) run(cmd *cobra.Command, args []string) error {
+	cfg, err := g.initConfig(cmd)
+	if err != nil {
+		return err
+	}
 
-		authService := authimpl.NewJWTService(userRepo, cfg.JWT.SecretKey, cfg.JWT.TokenDuration)
+	db, err := g.connectDatabase(cfg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
 
-		userService := app.NewUserService(userRepo, authService)
+	services, err := g.setupServices(db, cfg)
+	if err != nil {
+		return err
+	}
 
-		server := grpcserver.NewServer(userService, cfg)
+	return g.startServer(services, cfg)
+}
 
-		log.Printf("Starting gRPC server on port %s", cfg.Server.GRPCPort)
-		if err := server.Start(); err != nil {
-			log.Fatalf("Failed to start gRPC server: %v", err)
-		}
-	},
+func (g *GRPCServerCommand) initConfig(cmd *cobra.Command) (*config.Config, error) {
+	cfg, err := config.NewConfig(cmd)
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+		return nil, err
+	}
+
+	if err := logger.Initialize(cfg); err != nil {
+		log.Fatalf("Failed to initialize logger: %v", err)
+		return nil, err
+	}
+
+	return cfg, nil
+}
+
+func (g *GRPCServerCommand) connectDatabase(cfg *config.Config) (*sql.DB, error) {
+	db, err := sql.Open("postgres", cfg.GetDSN())
+	if err != nil {
+		logger.Fatal("Failed to connect to database", zap.Error(err))
+		return nil, err
+	}
+
+	if err := db.Ping(); err != nil {
+		logger.Fatal("Failed to ping database", zap.Error(err))
+		return nil, err
+	}
+
+	if err := repository.MigrateDB(db, "migrations"); err != nil {
+		logger.Fatal("Failed to apply migrations", zap.Error(err))
+		return nil, err
+	}
+
+	return db, nil
+}
+
+func (g *GRPCServerCommand) setupServices(db *sql.DB, cfg *config.Config) (*app.UserService, error) {
+	userRepo := repository.NewPostgresUserRepository(db)
+	authService := authimpl.NewJWTService(userRepo, cfg.JWT.SecretKey, cfg.JWT.TokenDuration)
+	userService := app.NewUserService(userRepo, authService)
+
+	return userService, nil
+}
+
+func (g *GRPCServerCommand) startServer(userService *app.UserService, cfg *config.Config) error {
+	server := grpcserver.NewServer(userService, cfg)
+
+	logger.Info("Starting gRPC server", zap.String("port", cfg.Server.GRPCPort))
+	return server.Start()
 }
 
 func init() {
-	grpcServerCmd.Flags().StringP("port", "p", "50051", "Port to run the gRPC server on")
-	grpcServerCmd.Flags().StringP("config", "c", "", "Path to config file")
+	defaultManager.AddCommand(newGRPCServerCommand())
 }

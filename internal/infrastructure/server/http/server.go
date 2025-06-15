@@ -2,12 +2,13 @@ package http
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"time"
 
 	"github.com/anatoly_dev/go-users/internal/app"
 	"github.com/anatoly_dev/go-users/internal/config"
+	"github.com/anatoly_dev/go-users/pkg/logger"
+	"go.uber.org/zap"
 )
 
 type Server struct {
@@ -37,11 +38,11 @@ func NewServer(userService *app.UserService, config *config.Config) *Server {
 }
 
 func (s *Server) Start() error {
-	log.Printf("Starting HTTP server on port %s", s.config.Server.HTTPPort)
+	logger.Info("Starting HTTP server", zap.String("port", s.config.Server.HTTPPort))
 	return s.server.ListenAndServe()
 }
 
 func (s *Server) Stop(ctx context.Context) error {
-	log.Printf("Stopping HTTP server")
+	logger.Info("Stopping HTTP server")
 	return s.server.Shutdown(ctx)
 }
