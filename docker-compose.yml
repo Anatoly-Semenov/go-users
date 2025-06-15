@@ -7,6 +7,7 @@ services:
     restart: always
     depends_on:
       - postgres
+      - redis
     ports:
       - "8080:8080"
       - "50051:50051"
@@ -17,6 +18,10 @@ services:
       - DB_PASSWORD=postgres
       - DB_NAME=users
       - DB_SSL_MODE=disable
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - REDIS_DB=0
       - JWT_SECRET_KEY=your-secret-key
       - JWT_EXPIRATION_HOURS=24
       - LOG_LEVEL=info
@@ -36,5 +41,15 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  redis:
+    image: redis:7-alpine
+    container_name: go-users-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
 volumes:
-  postgres_data: 
+  postgres_data:
+  redis_data: 
