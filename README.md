@@ -12,6 +12,9 @@
   - [HTTP Server](#http-server)
   - [gRPC Server](#grpc-server)
   - [Migrations](#migrations)
+- [Security Features](#security-features)
+  - [IP Blocking](#ip-blocking)
+  - [Brute Force Protection](#brute-force-protection)
 - [License](#license)
 
 ---
@@ -25,6 +28,8 @@ Key features:
 - Authentication using JWT tokens
 - Authorization and access control management
 - PostgreSQL database integration
+- IP-based security with brute force protection
+- Temporary and permanent IP blocking
 
 ---
 
@@ -70,6 +75,7 @@ go-users/
 To run the application, you need:
 - Go 1.18 or higher
 - PostgreSQL 13 or higher
+- Redis 6 or higher
 - Docker (optional)
 - Docker Compose (optional)
 
@@ -117,6 +123,12 @@ DB_PASSWORD=postgres
 DB_NAME=users
 DB_SSL_MODE=disable
 
+# Redis (for IP blocking)
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=
+REDIS_DB=0
+
 # JWT
 JWT_SECRET_KEY=your-secret-key
 JWT_EXPIRATION_HOURS=24
@@ -148,6 +160,34 @@ Apply database migrations:
 ```bash
 make migrate
 ```
+
+---
+
+## Security Features
+
+### IP Blocking
+
+The service implements a dual-layer IP blocking mechanism:
+
+- **Temporary Blocks**: Stored in Redis with configurable expiry times. These are created automatically when suspicious activity is detected.
+- **Permanent Blocks**: Stored in PostgreSQL without expiry. These can be created automatically after multiple violations or manually by administrators.
+
+IP blocking is enforced through middleware that checks each request against both blocking mechanisms.
+
+### Brute Force Protection
+
+The service includes an advanced traffic analyzer to protect against brute force attacks:
+
+- **Login Attempt Tracking**: Redis-based tracking of login attempts with sliding window time frames
+- **Automatic Blocking**: IPs exceeding configured thresholds are automatically blocked
+- **Progressive Penalties**: Repeated violations lead to longer blocks and potential permanent banning
+- **Block Escalation**: System can automatically escalate from temporary to permanent blocks based on repeated violations
+
+Default brute force protection configuration:
+- 5 failed login attempts within 5 minutes result in a 30-minute temporary block
+- 3 temporary blocks within 24 hours trigger a permanent block recommendation
+
+The protection is active for both HTTP and gRPC interfaces.
 
 ---
 

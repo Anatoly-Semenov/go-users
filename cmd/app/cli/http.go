@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"context"
 	"database/sql"
 	"log"
+	"net/http"
 
 	"github.com/anatoly_dev/go-users/internal/app"
 	"github.com/anatoly_dev/go-users/internal/config"
@@ -11,6 +13,7 @@ import (
 	httpserver "github.com/anatoly_dev/go-users/internal/infrastructure/server/http"
 	"github.com/anatoly_dev/go-users/pkg/logger"
 	_ "github.com/lib/pq"
+	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
@@ -24,7 +27,7 @@ func newHTTPServerCommand() *cobra.Command {
 	httpCmd.cmd = &cobra.Command{
 		Use:   "http-server",
 		Short: "Start HTTP server",
-		Long:  `Start the HTTP server for the user management service`,
+		Long:  `Start the HTTP server for the user management service with IP blocking protection`,
 		RunE:  httpCmd.run,
 	}
 
@@ -50,12 +53,18 @@ func (h *HTTPServerCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	services, err := h.setupServices(db, cfg)
+	redisClient, err := h.connectRedis(cfg)
+	if err != nil {
+		return err
+	}
+	defer redisClient.Close()
+
+	userService, handler, err := h.setupServices(db, redisClient, cfg)
 	if err != nil {
 		return err
 	}
 
-	return h.startServer(services, cfg)
+	return h.startServer(userService, handler, cfg)
 }
 
 func (h *HTTPServerCommand) initConfig(cmd *cobra.Command) (*config.Config, error) {
@@ -93,19 +102,62 @@ func (h *HTTPServerCommand) connectDatabase(cfg *config.Config) (*sql.DB, error)
 	return db, nil
 }
 
-func (h *HTTPServerCommand) setupServices(db *sql.DB, cfg *config.Config) (*app.UserService, error) {
-	userRepo := repository.NewPostgresUserRepository(db)
-	authService := authimpl.NewJWTService(userRepo, cfg.JWT.SecretKey, cfg.JWT.TokenDuration)
-	userService := app.NewUserService(userRepo, authService)
+func (h *HTTPServerCommand) connectRedis(cfg *config.Config) (*redis.Client, error) {
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:     cfg.GetRedisAddr(),
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.DB,
+	})
 
-	return userService, nil
+	ctx := context.Background()
+	_, err := redisClient.Ping(ctx).Result()
+	if err != nil {
+		logger.Fatal("Failed to connect to Redis", zap.Error(err))
+		return nil, err
+	}
+
+	logger.Info("Successfully connected to Redis", zap.String("addr", cfg.GetRedisAddr()))
+	return redisClient, nil
 }
 
-func (h *HTTPServerCommand) startServer(userService *app.UserService, cfg *config.Config) error {
-	server := httpserver.NewServer(userService, cfg)
+func (h *HTTPServerCommand) setupServices(db *sql.DB, redisClient *redis.Client, cfg *config.Config) (*app.UserService, http.Handler, error) {
+	userRepo := repository.NewPostgresUserRepository(db)
 
-	logger.Info("Starting HTTP server", zap.String("port", cfg.Server.HTTPPort))
-	return server.Start()
+	ipBlockPostgresRepo := repository.NewPostgresIPBlockRepository(db)
+	ipBlockRedisRepo := repository.NewRedisIPBlockRepository(redisClient)
+
+	bruteforceConfig := app.DefaultBruteforceDefenseConfig()
+	ipBlockService := app.NewIPBlockService(ipBlockPostgresRepo, ipBlockRedisRepo, bruteforceConfig)
+
+	baseAuthService := authimpl.NewJWTService(
+		userRepo,
+		cfg.JWT.SecretKey,
+		cfg.JWT.TokenDuration,
+	)
+
+	securedAuthService := authimpl.NewSecuredAuthService(baseAuthService, ipBlockService)
+
+	userService := app.NewUserService(userRepo, securedAuthService)
+
+	userHandler := httpserver.NewUserHandler(userService)
+
+	mux := http.NewServeMux()
+	userHandler.RegisterRoutes(mux)
+	
+	wrappedMux := httpserver.IPMiddleware(mux)
+	wrappedMux = httpserver.IPBlockMiddleware(ipBlockService)(wrappedMux)
+
+	return userService, wrappedMux, nil
+}
+
+func (h *HTTPServerCommand) startServer(userService *app.UserService, handler http.Handler, cfg *config.Config) error {
+	server := &http.Server{
+		Addr:    ":" + cfg.Server.HTTPPort,
+		Handler: handler,
+	}
+
+	logger.Info("Starting HTTP server with IP blocking protection", zap.String("port", cfg.Server.HTTPPort))
+	return server.ListenAndServe()
 }
 
 func init() {

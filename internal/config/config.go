@@ -11,6 +11,7 @@ import (
 type Config struct {
 	Server      ServerConfig
 	Database    DatabaseConfig
+	Redis       RedisConfig
 	JWT         JWTConfig
 	LogLevel    string
 	Environment string
@@ -31,6 +32,13 @@ type DatabaseConfig struct {
 	SSLMode  string
 }
 
+type RedisConfig struct {
+	Host     string
+	Port     string
+	Password string
+	DB       int
+}
+
 type JWTConfig struct {
 	SecretKey     string
 	TokenDuration time.Duration
@@ -48,6 +56,12 @@ func NewConfig(cmd *cobra.Command) (*Config, error) {
 			Password: getEnv("DB_PASSWORD", "postgres"),
 			DBName:   getEnv("DB_NAME", "users"),
 			SSLMode:  getEnv("DB_SSL_MODE", "disable"),
+		},
+		Redis: RedisConfig{
+			Host:     getEnv("REDIS_HOST", "localhost"),
+			Port:     getEnv("REDIS_PORT", "6379"),
+			Password: getEnv("REDIS_PASSWORD", ""),
+			DB:       getEnvAsInt("REDIS_DB", 0),
 		},
 		JWT: JWTConfig{
 			SecretKey:     getEnv("JWT_SECRET_KEY", "your-secret-key"),
@@ -88,6 +102,10 @@ func (c *Config) GetDSN() string {
 		c.Database.DBName,
 		c.Database.SSLMode,
 	)
+}
+
+func (c *Config) GetRedisAddr() string {
+	return fmt.Sprintf("%s:%s", c.Redis.Host, c.Redis.Port)
 }
 
 func getEnv(key, defaultValue string) string {

@@ -109,11 +109,16 @@ func (h *UserHandler) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	user, token, err := h.userService.Login(r.Context(), req.Email, req.Password)
 	if err != nil {
-		if err == auth.ErrInvalidCredentials {
+		switch err {
+		case auth.ErrInvalidCredentials:
 			respondWithError(w, http.StatusUnauthorized, "Invalid credentials")
-			return
+		case auth.ErrIPBlocked:
+			respondWithError(w, http.StatusForbidden, "Your IP address is blocked")
+		case auth.ErrTooManyAttempts:
+			respondWithError(w, http.StatusTooManyRequests, "Too many login attempts. Please try again later.")
+		default:
+			respondWithError(w, http.StatusInternalServerError, "Failed to authenticate")
 		}
-		respondWithError(w, http.StatusInternalServerError, "Failed to authenticate")
 		return
 	}
 
