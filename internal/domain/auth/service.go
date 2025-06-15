@@ -2,17 +2,10 @@ package auth
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/anatoly_dev/go-users/internal/domain/user"
 	"github.com/google/uuid"
-)
-
-var (
-	ErrInvalidCredentials = errors.New("invalid credentials")
-	ErrTokenExpired       = errors.New("token expired")
-	ErrInvalidToken       = errors.New("invalid token")
 )
 
 type TokenPayload struct {
