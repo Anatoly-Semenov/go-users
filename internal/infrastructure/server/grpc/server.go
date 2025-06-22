@@ -31,6 +31,14 @@ func NewServer(userService *app.UserService, config *config.Config) *Server {
 	}
 }
 
+func NewServerWithGRPCServer(userService *app.UserService, config *config.Config, grpcServer *grpc.Server) *Server {
+	return &Server{
+		userService: userService,
+		config:      config,
+		server:      grpcServer,
+	}
+}
+
 func (s *Server) Start() error {
 	addr := fmt.Sprintf(":%s", s.config.Server.GRPCPort)
 	listener, err := net.Listen("tcp", addr)
@@ -38,9 +46,11 @@ func (s *Server) Start() error {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
 
-	s.server = grpc.NewServer()
-	userv1.RegisterUserServiceServer(s.server, s)
+	if s.server == nil {
+		s.server = grpc.NewServer()
+	}
 
+	userv1.RegisterUserServiceServer(s.server, s)
 	reflection.Register(s.server)
 
 	logger.Info("Starting gRPC server", zap.String("port", s.config.Server.GRPCPort))
