@@ -15,6 +15,7 @@
 - [Security Features](#security-features)
   - [IP Blocking](#ip-blocking)
   - [Brute Force Protection](#brute-force-protection)
+- [Metrics System](#comprehensive-metrics-system)
 - [License](#license)
 
 ---
@@ -188,6 +189,22 @@ Default brute force protection configuration:
 - 3 temporary blocks within 24 hours trigger a permanent block recommendation
 
 The protection is active for both HTTP and gRPC interfaces.
+
+---
+
+## Comprehensive Metrics System
+
+Go-Users includes a production-ready metrics system with complete observability
+
+### Key Metrics Categories
+
+1. **Business Metrics**: User registrations, login success rates, active users
+2. **Security Metrics**: IP blocks, brute force attempts, security violations
+3. **API Performance**: HTTP/gRPC request rates, response times, error rates
+4. **Infrastructure**: Database connections, Redis performance, system resources
+5. **Application Health**: Uptime, error rates, panic recoveries
+
+See [METRICS.md](pkg/metrics/README.md) for complete metrics documentation.
 
 ---
 
