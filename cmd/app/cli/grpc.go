@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log"
+	"time"
 
 	"github.com/anatoly_dev/go-users/internal/app"
 	"github.com/anatoly_dev/go-users/internal/config"
@@ -11,10 +12,12 @@ import (
 	"github.com/anatoly_dev/go-users/internal/infrastructure/repository"
 	grpcserver "github.com/anatoly_dev/go-users/internal/infrastructure/server/grpc"
 	"github.com/anatoly_dev/go-users/pkg/logger"
+	"github.com/anatoly_dev/go-users/pkg/metrics"
 	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 type GRPCServerCommand struct {
@@ -26,7 +29,7 @@ func newGRPCServerCommand() *cobra.Command {
 	grpcCmd.cmd = &cobra.Command{
 		Use:   "grpc-server",
 		Short: "Start gRPC server",
-		Long:  `Start the gRPC server for the user management service with IP blocking protection`,
+		Long:  `Start the gRPC server for the user management service`,
 		RunE:  grpcCmd.run,
 	}
 
@@ -58,12 +61,22 @@ func (g *GRPCServerCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	defer redisClient.Close()
 
-	userService, err := g.setupServices(db, redisClient, cfg)
+	metricsSystem := metrics.NewMetrics()
+	metricsHelper := metrics.NewMetricsHelper(metricsSystem, db, redisClient)
+
+	metricsUpdater := metrics.NewMetricsUpdater(metricsHelper, db, redisClient, 30*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go metricsUpdater.Start(ctx)
+	defer metricsUpdater.Stop()
+
+	userService, server, err := g.setupServices(db, redisClient, cfg, metricsHelper)
 	if err != nil {
 		return err
 	}
 
-	return g.startServer(userService, cfg)
+	return g.startServer(userService, server, cfg)
 }
 
 func (g *GRPCServerCommand) initConfig(cmd *cobra.Command) (*config.Config, error) {
@@ -93,10 +106,14 @@ func (g *GRPCServerCommand) connectDatabase(cfg *config.Config) (*sql.DB, error)
 		return nil, err
 	}
 
+	start := time.Now()
 	if err := repository.MigrateDB(db, "migrations"); err != nil {
 		logger.Fatal("Failed to apply migrations", zap.Error(err))
 		return nil, err
 	}
+
+	logger.Info("Database migrations completed",
+		zap.Duration("duration", time.Since(start)))
 
 	return db, nil
 }
@@ -119,11 +136,11 @@ func (g *GRPCServerCommand) connectRedis(cfg *config.Config) (*redis.Client, err
 	return redisClient, nil
 }
 
-func (g *GRPCServerCommand) setupServices(db *sql.DB, redisClient *redis.Client, cfg *config.Config) (*app.UserService, error) {
-	userRepo := repository.NewPostgresUserRepository(db)
+func (g *GRPCServerCommand) setupServices(db *sql.DB, redisClient *redis.Client, cfg *config.Config, metricsHelper *metrics.MetricsHelper) (*app.UserService, *grpcserver.Server, error) {
+	userRepo := repository.NewPostgresUserRepositoryWithMetrics(db, metricsHelper)
 
 	ipBlockPostgresRepo := repository.NewPostgresIPBlockRepository(db)
-	ipBlockRedisRepo := repository.NewRedisIPBlockRepository(redisClient)
+	ipBlockRedisRepo := repository.NewRedisIPBlockRepositoryWithMetrics(redisClient, metricsHelper)
 
 	bruteforceConfig := app.DefaultBruteforceDefenseConfig()
 	ipBlockService := app.NewIPBlockService(ipBlockPostgresRepo, ipBlockRedisRepo, bruteforceConfig)
@@ -138,14 +155,23 @@ func (g *GRPCServerCommand) setupServices(db *sql.DB, redisClient *redis.Client,
 
 	userService := app.NewUserService(userRepo, securedAuthService)
 
-	return userService, nil
+	metricsInterceptor := grpcserver.NewMetricsInterceptor(metricsHelper)
+
+	server := grpc.NewServer(
+		grpc.UnaryInterceptor(metricsInterceptor.UnaryServerInterceptor()),
+		grpc.StreamInterceptor(metricsInterceptor.StreamServerInterceptor()),
+	)
+
+	grpcServer := grpcserver.NewServerWithGRPCServer(userService, cfg, server)
+
+	logger.Info("gRPC server services initialized with comprehensive metrics")
+	return userService, grpcServer, nil
 }
 
-func (g *GRPCServerCommand) startServer(userService *app.UserService, cfg *config.Config) error {
+func (g *GRPCServerCommand) startServer(userService *app.UserService, server *grpcserver.Server, cfg *config.Config) error {
+	logger.Info("Starting gRPC server with comprehensive metrics",
+		zap.String("port", cfg.Server.GRPCPort))
 
-	server := grpcserver.NewServer(userService, cfg)
-
-	logger.Info("Starting gRPC server with IP blocking protection", zap.String("port", cfg.Server.GRPCPort))
 	return server.Start()
 }
 
