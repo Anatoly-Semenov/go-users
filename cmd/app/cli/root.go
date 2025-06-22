@@ -23,6 +23,7 @@ func NewCommandManager() *CommandManager {
 }
 
 func (cm *CommandManager) initCommands() {
+	// Todo: implementing
 }
 
 func (cm *CommandManager) AddCommand(cmds ...*cobra.Command) {
