@@ -204,7 +204,7 @@ Go-Users includes a production-ready metrics system with complete observability
 4. **Infrastructure**: Database connections, Redis performance, system resources
 5. **Application Health**: Uptime, error rates, panic recoveries
 
-See [METRICS.md](pkg/metrics/README.md) for complete metrics documentation.
+See [METRICS.md](app/pkg/metrics/README.md) for complete metrics documentation.
 
 ---
 
